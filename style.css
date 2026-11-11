@@ -199,3 +199,20 @@ button.card:active { background: var(--surface-2); }
   .mic.on::after { animation: none; opacity: 0.6; }
   * { transition: none !important; }
 }
+
+/* ---------- 確定・修正・深掘り ---------- */
+a.card, a.item, a.btn { text-decoration: none; color: inherit; }
+a.btn.primary { color: var(--brand-ink); }
+.warn { font-size: 14px; color: #9a3412; background: var(--accent-soft); border-radius: var(--radius-m); padding: 12px 16px; margin: 0 0 20px; }
+.skip { border: 0; background: none; color: var(--ink-2); font-size: 14px; padding: 8px; min-height: 40px; flex: none; }
+.tag.drill { background: var(--brand-soft); color: var(--brand); }
+.status-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 4px; min-height: 20px; }
+.timer { font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; font-weight: 600; }
+.timer.over { color: var(--accent); }
+.saved { margin-top: 0; }
+.saved.ok { color: var(--done); }
+.saved.err { color: var(--accent); }
+.sync-note { display: block; font-size: 12px; color: var(--done); line-height: 1.4; }
+.conn { font-size: 14px; color: var(--ink-2); margin: 0 0 12px; }
+.answer.locked { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); }
+.dock-inner.three { grid-template-columns: 1fr 1fr 1fr; }

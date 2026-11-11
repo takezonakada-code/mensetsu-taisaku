@@ -25,6 +25,16 @@ for k in order:
     keep["items"] = [{"row": it["row"], "title": TITLES[it["row"]], "intent": it.get("intent", ""),
                       "questions": [{"id": q["id"], "col": q["col"], "q": q["q"], "hint": q.get("hint", ""), "must": bool(q.get("must"))} for q in it["questions"]]}
                      for it in sorted(d["items"], key=lambda i: i["row"])]
+    dp = src / f"{k}_drill.json"
+    drills = {}
+    if dp.exists():
+        for it in clean(json.loads(dp.read_text()))["items"]:
+            drills[it["row"]] = [{"id": q["id"], "type": q.get("type", ""), "q": q["q"], "aim": q.get("aim", ""), "good": q.get("good", ""),
+                                  "sec": int(q.get("sec") or 45), "core": bool(q.get("core"))} for q in it["drill"]]
+    else:
+        print("no drill", k)
+    for it in keep["items"]:
+        it["drill"] = drills.get(it["row"], [])
     whole = json.dumps(keep, ensure_ascii=False); items = json.dumps(keep["items"], ensure_ascii=False)
     for pat in NG:
         txt = items if pat.startswith("\\d") else whole
@@ -32,4 +42,4 @@ for k in order:
         if m: sys.exit(f"NG word in {k}: {pat} … {txt[max(0,m.start()-30):m.end()+30]}")
     cos.append(keep)
 out.write_text("window.INTERVIEW_DATA = " + json.dumps({"companies": cos}, ensure_ascii=False, indent=1) + ";\n")
-print("ok", [c["key"] for c in cos], sum(len(q["questions"]) for c in cos for q in c["items"]), "questions")
+print("ok", [c["key"] for c in cos], sum(len(q["questions"]) for c in cos for q in c["items"]), "questions", sum(len(q["drill"]) for c in cos for q in c["items"]), "drill")
