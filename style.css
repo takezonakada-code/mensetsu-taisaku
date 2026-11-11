@@ -216,3 +216,12 @@ a.btn.primary { color: var(--brand-ink); }
 .conn { font-size: 14px; color: var(--ink-2); margin: 0 0 12px; }
 .answer.locked { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); }
 .dock-inner.three { grid-template-columns: 1fr 1fr 1fr; }
+
+/* ---------- AIで整えた文章 ---------- */
+.ai { margin-top: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 12px 16px 16px; }
+.ai-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ai-title { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.ai-body { white-space: pre-wrap; font-size: 15px; line-height: 1.8; margin-top: 8px; }
+.ai-empty { color: var(--ink-3); font-size: 13px; }
+.ai-actions { margin-top: 12px; }
+.ai .text-btn[disabled] { color: var(--ink-3); }

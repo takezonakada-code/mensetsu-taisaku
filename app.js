@@ -236,6 +236,16 @@
     html += '<textarea class="answer' + (locked ? " locked" : "") + '" id="answer" placeholder="ここに入力、または下のマイクで話す" rows="6"' + (locked ? " readonly" : "") + ">" + esc(getAns(key, q.id)) + "</textarea>";
     html += '<div class="interim" id="interim" aria-live="polite"></div>';
     html += '<div class="status-row"><span id="timer" class="timer"></span><span id="saved" class="saved"></span></div>';
+    if (!locked) {
+      var aiPrev = getAi(key, q.id);
+      html += '<section class="ai" id="ai">' +
+        '<div class="ai-head"><span class="ai-title">AIが面接用に整えた文章</span>' +
+        '<button class="text-btn" id="aiRun"' + (conn ? "" : " disabled") + ">" + (aiPrev ? "整え直す" : "整える") + "</button></div>" +
+        '<div class="ai-body" id="aiBody">' + (aiPrev ? esc(aiPrev.out) : '<span class="ai-empty">' + (conn ? "話し終えると、" + esc(co.name) + "の求める人物像と面接で見ているポイントに沿って、この質問への答えに整えます" : "シートとつなぐと使えます") + "</span>") + "</div>" +
+        '<div class="ai-actions" id="aiActions"' + (aiPrev ? "" : " hidden") + '><button class="btn" id="aiUse">この文章を使う</button></div>' +
+        (getRaw(key, q.id) ? '<button class="text-btn" id="rawBack">自分が話した内容に戻す</button>' : "") +
+        "</section>";
+    }
     html += "</main>";
 
     var hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -303,8 +313,53 @@
       };
     });
 
-    if (hasSR) setupMic(ta, save, cur.drill ? q.sec : 0);
+    /* AIで整える */
+    var aiBody = document.getElementById("aiBody"), aiRun = document.getElementById("aiRun"), aiActions = document.getElementById("aiActions");
+    var aiBusy = false;
+    function runAi(auto) {
+      var src = ta.value.trim();
+      if (!conn || aiBusy) return;
+      if (!src) { if (!auto) toast("先に話すか入力してください"); return; }
+      var prev = getAi(key, q.id);
+      if (auto && prev && prev.src === src) return;
+      aiBusy = true; aiRun.disabled = true; aiRun.textContent = "整えています";
+      aiBody.innerHTML = '<span class="ai-empty">整えています。10〜20秒ほどかかります</span>';
+      var context = col === "D" ? cellText(co, it.row, "C") : "";
+      fetch(conn.url, {
+        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ token: conn.token, action: "polish", company: key, row: it.row, col: col, itemTitle: it.title, question: q.q, context: context, text: src })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || "failed");
+        setAi(key, q.id, src, res.text);
+        if (document.getElementById("aiBody") !== aiBody) return;
+        aiBody.textContent = res.text; aiActions.hidden = false;
+      }).catch(function (err) {
+        if (document.getElementById("aiBody") !== aiBody) return;
+        var m = String(err.message || "");
+        aiBody.innerHTML = '<span class="ai-empty">' + (m === "no-key" ? "AIのキーがまだ設定されていません" : "整えられませんでした。もう一度押してください") + "</span>";
+      }).then(function () {
+        aiBusy = false;
+        if (document.getElementById("aiRun") === aiRun) { aiRun.disabled = false; aiRun.textContent = "整え直す"; }
+      });
+    }
+    aiRun.onclick = function () { runAi(false); };
+    document.getElementById("aiUse").onclick = function () {
+      var a = getAi(key, q.id); if (!a) return;
+      var body = a.out.split("【足すと良いこと】")[0].trim();
+      if (!getRaw(key, q.id)) setRaw(key, q.id, ta.value);
+      ta.value = body; autoGrow(ta); save(); toast("整えた文章を回答に入れました");
+      viewQuestion(key, mode, idx);
+    };
+    var rb = document.getElementById("rawBack");
+    if (rb) rb.onclick = function () { ta.value = getRaw(key, q.id); setRaw(key, q.id, ""); save(); viewQuestion(key, mode, idx); };
+
+    if (hasSR) setupMic(ta, save, cur.drill ? q.sec : 0, function () { runAi(true); });
   }
+  function bucket(name, ck) { if (!state[name]) state[name] = {}; if (!state[name][ck]) state[name][ck] = {}; return state[name][ck]; }
+  function getAi(ck, qid) { return (state.ai && state.ai[ck] && state.ai[ck][qid]) || null; }
+  function setAi(ck, qid, src, out) { bucket("ai", ck)[qid] = { src: src, out: out }; persist(); }
+  function getRaw(ck, qid) { return (state.raw && state.raw[ck] && state.raw[ck][qid]) || ""; }
+  function setRaw(ck, qid, t) { var b = bucket("raw", ck); if (t) b[qid] = t; else delete b[qid]; persist(); }
   function othersForRow(key, row) {
     var out = [];
     DATA.companies.forEach(function (co) {
@@ -319,12 +374,25 @@
   function autoGrow(ta) { ta.style.height = "auto"; ta.style.height = Math.max(200, ta.scrollHeight + 2) + "px"; }
 
   var timerId = null;
-  function setupMic(ta, save, target) {
+  function setupMic(ta, save, target, onStop) {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var btn = document.getElementById("mic"), label = document.getElementById("micLabel"), interimEl = document.getElementById("interim"), timerEl = document.getElementById("timer");
-    var wanted = false, base = "", sessionFinal = "", started = 0;
+    var wanted = false, base = "", sessionText = "", started = 0;
 
-    function joinText(a, b) { if (!a) return b; if (!b) return a; return /[\s\n]$/.test(a) ? a + b : a + "\n" + b; }
+    function joinText(a, b) { if (!a) return b; if (!b) return a; return /[\s\n。、]$/.test(a) ? a + b : a + "。" + b; }
+    // iPhoneのSafariは、確定した結果に「それまでの全文」を重ねて返すことがあるので、重なりを除いてつなぐ
+    function appendResult(acc, t) {
+      t = t.trim(); if (!t) return acc;
+      if (!acc) return t;
+      if (t.indexOf(acc) === 0) return t;
+      if (acc.slice(-t.length) === t) return acc;
+      return acc + t;
+    }
+    function keepVisible() {
+      var dock = document.querySelector(".dock"); if (!dock) return;
+      var r = ta.getBoundingClientRect(), limit = dock.getBoundingClientRect().top - 16;
+      if (r.bottom > limit) window.scrollBy(0, r.bottom - limit);
+    }
     function tick() {
       var s = Math.floor((Date.now() - started) / 1000);
       timerEl.textContent = fmtSec(s) + (target ? " / 目安 " + fmtSec(target) : "");
@@ -333,26 +401,28 @@
     function startSession() {
       var r = new SR();
       r.lang = "ja-JP"; r.continuous = true; r.interimResults = true;
-      sessionFinal = "";
+      sessionText = "";
       r.onresult = function (e) {
         var fin = "", inter = "";
         for (var i = 0; i < e.results.length; i++) {
           var t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) fin += t; else inter += t;
+          if (e.results[i].isFinal) fin = appendResult(fin, t); else inter += t;
         }
-        sessionFinal = fin;
-        ta.value = joinText(base, sessionFinal);
-        interimEl.textContent = inter;
-        autoGrow(ta);
+        // 確定前の文字も同じ枠に入れる（途中で認識が切れても消えない）
+        sessionText = inter && inter.indexOf(fin) === 0 ? inter : fin + inter;
+        ta.value = joinText(base, sessionText);
+        interimEl.textContent = "";
+        autoGrow(ta); keepVisible();
         save();
       };
       r.onerror = function (e) {
         if (e.error === "not-allowed" || e.error === "service-not-allowed") { wanted = false; toast("マイクの使用が許可されていません"); }
       };
       r.onend = function () {
-        base = joinText(base, sessionFinal); sessionFinal = "";
+        base = joinText(base, sessionText); sessionText = "";
+        ta.value = base; autoGrow(ta);
         interimEl.textContent = "";
-        if (wanted) { try { rec = startSession(); } catch (err) { setOff(); } } else setOff();
+        if (wanted) { try { rec = startSession(); } catch (err) { setOff(); } } else { setOff(); if (onStop) onStop(); }
       };
       r.start();
       return r;
