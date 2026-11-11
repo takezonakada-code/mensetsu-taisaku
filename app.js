@@ -95,13 +95,22 @@
       body: JSON.stringify({ token: conn.token, action: "polish", company: p.co.key, row: p.row, col: p.col, itemTitle: p.itemTitle, question: p.question, context: p.context, text: p.text })
     }).then(function (r) { return r.json(); }).then(function (res) { if (!res.ok) throw new Error(res.error || "failed"); return res.text; });
   }
-  function aiErrorText(m) {
+  function aiErrorText(m, detail) {
     if (m === "no-key") return "シート側のAIのキーがまだ設定されていません";
-    if (m === "invalid_api_key" || m === "http-401") return "OpenAIのAPIキーが正しくありません。設定で入れ直してください";
-    if (m === "insufficient_quota" || m === "http-429") return "OpenAIの残高が足りないか、混み合っています。OpenAIの請求設定を確認するか、少し待ってからもう一度押してください";
-    if (m === "model_not_found" || m === "http-404") return "設定のモデル名が使えません。設定でモデル名を確認してください";
-    return "整えられませんでした。もう一度押してください";
+    if (m === "invalid_api_key" || m === "http-401") return "OpenAIのAPIキーが正しくありません。コピーが途中で切れていないか確認して、入れ直してください";
+    if (m === "insufficient_quota") return "OpenAIのAPIの残高がありません。platform.openai.com の Billing で支払い方法とクレジットを入れてください（ChatGPTの月額プランとは別です）";
+    if (m === "http-429" || m === "rate_limit_exceeded") return "OpenAIが混み合っています。少し待ってからもう一度押してください";
+    if (m === "model_not_found" || m === "http-404" || (m === "http-400" && /model/i.test(detail || ""))) return "選んだモデルがこのアカウントでは使えません。モデルを別のものに変えて、もう一度試してください";
+    if (m === "Load failed" || m === "Failed to fetch" || m === "NetworkError when attempting to fetch resource.") return "OpenAIにつながりませんでした。電波を確認するか、LINEの中ではなくSafariやChromeでこのページを開いて試してください";
+    return "整えられませんでした" + (detail ? "（" + detail + "）" : "") + "。もう一度押してください";
   }
+  var OA_MODELS = [
+    ["gpt-5.6-sol", "GPT-5.6 Sol（いちばん賢い・おすすめ）"],
+    ["gpt-5.6-terra", "GPT-5.6 Terra（バランス）"],
+    ["gpt-5.6-luna", "GPT-5.6 Luna（速くて安い）"],
+    ["gpt-5.1", "GPT-5.1（上が使えない時）"],
+    ["gpt-4.1", "GPT-4.1（上が使えない時）"]
+  ];
 
   /* ---------- 画面：設定（OpenAI APIキー） ---------- */
   function viewSettings() {
@@ -109,7 +118,12 @@
     var html = bar("AIの設定", "", "#/") + "<main>";
     html += '<p class="lead">自分のOpenAIアカウントのAPIキーを入れると、この端末の「AIが面接用に整えた文章」が自分のGPTで動きます。キーはこの端末のブラウザにだけ保存され、サイトやほかの人には送られません。利用料は自分のOpenAIアカウントに請求されます。</p>';
     html += '<label class="field"><span>OpenAIのAPIキー</span><input id="oaKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-で始まるキー" value="' + esc(o.key || "") + '"></label>';
-    html += '<label class="field"><span>モデル</span><input id="oaModel" type="text" autocomplete="off" spellcheck="false" value="' + esc(o.model || OA_DEFAULT_MODEL) + '"></label>';
+    var curModel = o.model || OA_DEFAULT_MODEL;
+    var known = OA_MODELS.some(function (x) { return x[0] === curModel; });
+    html += '<label class="field"><span>モデル</span><select id="oaModel">' +
+      OA_MODELS.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === curModel ? " selected" : "") + ">" + esc(x[1]) + "</option>"; }).join("") +
+      (known ? "" : '<option value="' + esc(curModel) + '" selected>' + esc(curModel) + "</option>") +
+      "</select></label>";
     html += '<div class="stack"><button class="btn primary" id="oaSave">保存して確かめる</button>' +
       (o.key ? '<button class="btn" id="oaDel">キーを削除する</button>' : "") + "</div>";
     html += '<p class="note" id="oaMsg">' + (o.key ? "キーが入っています" : "") + "</p>";
@@ -124,7 +138,7 @@
       callOpenAI({ key: k, model: m }, "短く答えてください。", "「OK」とだけ返してください。").then(function () {
         saveOa({ key: k, model: m }); msg.textContent = "つながりました。AIの欄が自分のGPTで動きます"; msg.className = "note ok";
       }, function (err) {
-        msg.textContent = aiErrorText(String(err.message || "")); msg.className = "note err";
+        msg.textContent = aiErrorText(String(err.message || ""), err.detail); msg.className = "note err";
       }).then(function () { b.disabled = false; b.textContent = "保存して確かめる"; });
     };
     var d = document.getElementById("oaDel");
@@ -422,7 +436,7 @@
         aiBody.textContent = out; aiActions.hidden = false;
       }).catch(function (err) {
         if (document.getElementById("aiBody") !== aiBody) return;
-        aiBody.innerHTML = '<span class="ai-empty">' + esc(aiErrorText(String(err.message || ""))) + "</span>";
+        aiBody.innerHTML = '<span class="ai-empty">' + esc(aiErrorText(String(err.message || ""), err.detail)) + "</span>";
       }).then(function () {
         aiBusy = false;
         if (document.getElementById("aiRun") === aiRun) { aiRun.disabled = false; aiRun.textContent = "整え直す"; }

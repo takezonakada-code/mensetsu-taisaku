@@ -230,11 +230,11 @@ a.btn.primary { color: var(--brand-ink); }
 a.skip { text-decoration: none; display: inline-flex; align-items: center; }
 .field { display: block; margin: 0 0 16px; }
 .field span { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
-.field input {
+.field input, .field select {
   width: 100%; min-height: 48px; padding: 12px 16px; font-size: 16px; border: 1px solid var(--line-strong);
   border-radius: var(--radius-m); background: var(--surface); outline: none;
 }
-.field input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.field input:focus, .field select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .note.ok { color: var(--done); }
 .note.err { color: var(--accent); }
 .ai-empty a { color: var(--brand); font-weight: 600; }
