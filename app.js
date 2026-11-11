@@ -237,8 +237,8 @@
   /* ---------- 画面：ホーム ---------- */
   function viewHome() {
     var html = bar("面接準備", "模擬面接までにシートのC列・D列を埋める", "", '<a class="skip" href="#/settings">AIの設定</a>') + "<main>";
-    html += '<p class="lead">会社を選び、質問に声か文字で答えて「確定」を押すと、面接シートのその会社のタブ（C列・D列）に入ります。深掘り練習では、面接官の突っ込みに時間を計りながら答えます。</p>';
-    if (!conn) html += '<p class="warn">この端末はまだシートとつながっていません。左腕たけちゃんから届く設定用リンクを一度開いてください。それまでは答えはこの端末にだけ保存されます。</p>';
+    html += '<p class="lead">会社を選び、質問に声か文字で答えてください。話し終えると、AIがその会社の求める人物像に沿って面接用の文章に整えます。答えはこの端末に保存されます。</p>';
+    if (!aiReady()) html += '<p class="warn">AIで整えるには、右上の「AIの設定」でOpenAIのAPIキーを入れてください。</p>';
     html += '<div class="list">';
     DATA.companies.forEach(function (co) {
       var s = stats(co);
@@ -249,7 +249,7 @@
         '<div class="meter-row"><span>必須 <b>' + s.mustDone + "</b> / " + s.must + "</span><span>深掘り <b>" + s.coreDone + "</b> / " + s.core + "</span><span>全体 <b>" + s.done + "</b> / " + s.total + "</span></div></a>";
     });
     html += "</div>";
-    html += '<div class="footer-actions"><a class="btn" href="#/send">' + ICON.send + "回答をまとめる・送る</a></div>";
+    html += '<div class="footer-actions"><a class="btn" href="#/send">' + ICON.send + "回答をまとめてコピー</a></div>";
     html += "</main>";
     app.innerHTML = html;
   }
@@ -369,8 +369,8 @@
       if (!getAns(key, q.id)) { savedEl.textContent = ""; savedEl.className = "saved"; return; }
       var conf = isConfirmed(key, q.id);
       if (conf && isSynced(co, it.row, col)) { savedEl.textContent = "確定済み・シートの" + col + it.row + "に反映済み"; savedEl.className = "saved ok"; }
-      else if (conf) { savedEl.textContent = "確定済み（シートには未反映）"; savedEl.className = "saved"; }
-      else if (editing[ek]) { savedEl.textContent = "修正中。直したら「再確定」でシートも書き直します"; savedEl.className = "saved"; }
+      else if (conf) { savedEl.textContent = "確定済み"; savedEl.className = "saved"; }
+      else if (editing[ek]) { savedEl.textContent = "修正中。直したら「再確定」を押してください"; savedEl.className = "saved"; }
       else { savedEl.textContent = "この端末に保存（未確定）"; savedEl.className = "saved"; }
     }
     showSync();
@@ -399,7 +399,7 @@
       if (!ta.value.trim()) { toast("答えを入れてから確定してください"); return; }
       var wasEditing = !!editing[ek];
       setConfirmed(key, q.id); delete editing[ek];
-      if (!conn) { toast("確定しました（シート未接続のため端末に保存）"); setTimeout(function () { move(idx + 1); }, 600); return; }
+      if (!conn) { toast("確定しました"); setTimeout(function () { move(idx + 1); }, 600); return; }
       cbtn.disabled = true; cbtn.textContent = "書き込み中";
       pushCell(co, it.row, col).then(function () {
         toast((wasEditing ? "シートの" + col + it.row + "を書き直しました" : "シートの" + col + it.row + "に入れました"));
@@ -594,20 +594,19 @@
   }
   function countAnswered(sel) { var n = 0; DATA.companies.forEach(function (co) { if (sel === "all" || sel === co.key) n += stats(co).done; }); return n; }
   function viewSend() {
-    var html = bar("回答をまとめる・送る", "", "#/") + "<main>";
+    var html = bar("回答をまとめる", "", "#/") + "<main>";
     html += '<div class="seg" role="group" aria-label="範囲">';
     html += '<button data-sel="all" aria-pressed="' + (sendSel === "all") + '">すべて</button>';
     DATA.companies.forEach(function (co) { html += '<button data-sel="' + co.key + '" aria-pressed="' + (sendSel === co.key) + '">' + esc(co.name) + "</button>"; });
     html += "</div>";
     var n = countAnswered(sendSel), pending = allCells(sendSel);
-    html += '<p class="conn">' + (conn ? "シートとつながっています。未反映のセル：" + pending.length + "か所" : "シートとはまだつながっていません") + "</p>";
     if (!n) html += '<p class="empty">まだ回答がありません</p>';
     else html += '<div class="preview">' + esc(buildText(sendSel)) + "</div>";
     html += '<div class="stack">' +
       (conn ? '<button class="btn primary" id="sync"' + (pending.length ? "" : " disabled") + ">" + ICON.sheet + "未反映のセルをシートに入れる（" + pending.length + "）</button>" : "") +
-      '<button class="btn" id="copy"' + (n ? "" : " disabled") + ">" + ICON.copy + "まとめてコピー</button>" +
+      '<button class="btn primary" id="copy"' + (n ? "" : " disabled") + ">" + ICON.copy + "まとめてコピー</button>" +
       '<button class="btn" id="dl"' + (n ? "" : " disabled") + ">" + ICON.file + "ファイルに保存</button></div>";
-    html += '<p class="note">答えはこの端末のブラウザに保存されます。「確定」を押した項目は、面接シートの各社タブのC列・D列にも入ります。別の端末に移すときは、保存したファイルを「回答を読み込む」で開いてください。</p>';
+    html += '<p class="note">答えはこの端末のブラウザに保存されます。「まとめてコピー」で、シートのC列・D列に貼れる形でまとめて取り出せます。別の端末に移すときは、保存したファイルを「回答を読み込む」で開いてください。</p>';
     html += '<button class="text-btn" id="import">回答を読み込む</button><input type="file" id="importFile" accept=".json,application/json" hidden>';
     html += "</main>";
     app.innerHTML = html;
