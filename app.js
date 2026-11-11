@@ -39,6 +39,97 @@
   var editing = {};
 
   var conn = loadConn();
+
+  /* ---------- AI：その人のOpenAI APIキー（この端末にだけ保存）→ なければシート側のClaude ---------- */
+  var OA_KEY = "mensetsu-taisaku:openai";
+  var OA_DEFAULT_MODEL = "gpt-5.6-sol";
+  function loadOa() { try { return JSON.parse(localStorage.getItem(OA_KEY) || "null"); } catch (e) { return null; } }
+  function saveOa(v) { try { if (v) localStorage.setItem(OA_KEY, JSON.stringify(v)); else localStorage.removeItem(OA_KEY); } catch (e) {} }
+  function aiReady() { var o = loadOa(); return !!(o && o.key) || !!conn; }
+
+  function polishPrompt(p) {
+    var co = p.co, lines = [];
+    lines.push("あなたは転職の面接対策のコーチです。候補者が声で話した回答を、面接でそのまま話せる文章に整えます。");
+    lines.push("");
+    lines.push("# 受ける会社：" + co.name + "（" + co.position + "）");
+    if (co.tagline) lines.push(co.tagline);
+    if (co.lookFor && co.lookFor.length) { lines.push("", "## 面接で見ているポイント"); co.lookFor.forEach(function (x) { lines.push("- " + x.label + "：" + x.detail); }); }
+    [["求める人物像", co.persona], ["業務内容", co.work], ["内定事例・評価される人", co.cases], ["会社の言葉", co.keywords]].forEach(function (s) {
+      if (s[1] && s[1].length) { lines.push("", "## " + s[0]); s[1].forEach(function (x) { lines.push("- " + x); }); }
+    });
+    lines.push("", "# 整え方",
+      "- 候補者が話した事実だけを使う。経験・数字・固有名詞を足したり盛ったりしない。足りない要素があれば、文章の最後に【足すと良いこと】として短く挙げる",
+      "- 話した具体的な場面・言葉・細部は削らずに残す。話が前後したり言い直したりしていても、文脈をつないで一本の筋の通った答えにする。音声の誤変換は文脈から正しい言葉に直す",
+      "- 答えは「質問」とシートの「項目」に対する答えになっていること",
+      "- 上の「求める人物像」「面接で見ているポイント」に沿うよう、どの事実を前に出すか・どう言葉にするかを選ぶ",
+      "- 結論から話す。です・ます調の話し言葉で、声に出して自然な長さにする",
+      "- 数字は、何と比べてどうか（何人中・平均と比べて）が伝わる形にする。比較がなければ【足すと良いこと】に回す",
+      "- 経験 → そう思った理由（感情）→ これからどうしたいか、がつながるようにする",
+      "- 出力は整えた文章と【足すと良いこと】だけ。前置きや解説は書かない");
+    var user = "面接シートの項目：" + p.itemTitle + "\n質問：" + p.question + "\n" +
+      (p.context ? "この項目ですでに答えている結論：" + p.context + "\n" : "") +
+      (p.col === "C" ? "この答えはシートのC列（結論）に入ります。2〜3文で、聞かれたことに一言で答える形にしてください。"
+                     : "この答えはシートのD列（深掘り）に入ります。場面 → 自分の行動 → 結果 → 学び の流れで、面接官に深掘られた時にそのまま話せる形にしてください。") +
+      "\n\n候補者が話した内容（音声の文字起こし。誤変換を含む）：\n" + p.text;
+    return { system: lines.join("\n"), user: user };
+  }
+  function callOpenAI(o, system, user) {
+    return fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + o.key },
+      body: JSON.stringify({ model: o.model || OA_DEFAULT_MODEL, messages: [{ role: "system", content: system }, { role: "user", content: user }] })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (b) {
+        if (!r.ok) { var e = new Error((b.error && b.error.code) || ("http-" + r.status)); e.status = r.status; e.detail = b.error && b.error.message; throw e; }
+        var t = b.choices && b.choices[0] && b.choices[0].message && b.choices[0].message.content;
+        if (!t) throw new Error("empty");
+        return String(t).trim();
+      });
+    });
+  }
+  function polishText(p) {
+    var o = loadOa();
+    if (o && o.key) { var pr = polishPrompt(p); return callOpenAI(o, pr.system, pr.user); }
+    return fetch(conn.url, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ token: conn.token, action: "polish", company: p.co.key, row: p.row, col: p.col, itemTitle: p.itemTitle, question: p.question, context: p.context, text: p.text })
+    }).then(function (r) { return r.json(); }).then(function (res) { if (!res.ok) throw new Error(res.error || "failed"); return res.text; });
+  }
+  function aiErrorText(m) {
+    if (m === "no-key") return "シート側のAIのキーがまだ設定されていません";
+    if (m === "invalid_api_key" || m === "http-401") return "OpenAIのAPIキーが正しくありません。設定で入れ直してください";
+    if (m === "insufficient_quota" || m === "http-429") return "OpenAIの残高が足りないか、混み合っています。OpenAIの請求設定を確認するか、少し待ってからもう一度押してください";
+    if (m === "model_not_found" || m === "http-404") return "設定のモデル名が使えません。設定でモデル名を確認してください";
+    return "整えられませんでした。もう一度押してください";
+  }
+
+  /* ---------- 画面：設定（OpenAI APIキー） ---------- */
+  function viewSettings() {
+    var o = loadOa() || {};
+    var html = bar("AIの設定", "", "#/") + "<main>";
+    html += '<p class="lead">自分のOpenAIアカウントのAPIキーを入れると、この端末の「AIが面接用に整えた文章」が自分のGPTで動きます。キーはこの端末のブラウザにだけ保存され、サイトやほかの人には送られません。利用料は自分のOpenAIアカウントに請求されます。</p>';
+    html += '<label class="field"><span>OpenAIのAPIキー</span><input id="oaKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-で始まるキー" value="' + esc(o.key || "") + '"></label>';
+    html += '<label class="field"><span>モデル</span><input id="oaModel" type="text" autocomplete="off" spellcheck="false" value="' + esc(o.model || OA_DEFAULT_MODEL) + '"></label>';
+    html += '<div class="stack"><button class="btn primary" id="oaSave">保存して確かめる</button>' +
+      (o.key ? '<button class="btn" id="oaDel">キーを削除する</button>' : "") + "</div>";
+    html += '<p class="note" id="oaMsg">' + (o.key ? "キーが入っています" : "") + "</p>";
+    html += '<p class="note">APIキーは platform.openai.com の「API keys」で作れます。ChatGPTの月額プランとは別に、API用の支払い設定が必要です。共用の端末では入れないでください。</p>';
+    html += "</main>";
+    app.innerHTML = html;
+    var msg = document.getElementById("oaMsg");
+    document.getElementById("oaSave").onclick = function () {
+      var k = document.getElementById("oaKey").value.trim(), m = document.getElementById("oaModel").value.trim() || OA_DEFAULT_MODEL;
+      if (!k) { msg.textContent = "キーを入れてください"; return; }
+      var b = this; b.disabled = true; b.textContent = "確かめています";
+      callOpenAI({ key: k, model: m }, "短く答えてください。", "「OK」とだけ返してください。").then(function () {
+        saveOa({ key: k, model: m }); msg.textContent = "つながりました。AIの欄が自分のGPTで動きます"; msg.className = "note ok";
+      }, function (err) {
+        msg.textContent = aiErrorText(String(err.message || "")); msg.className = "note err";
+      }).then(function () { b.disabled = false; b.textContent = "保存して確かめる"; });
+    };
+    var d = document.getElementById("oaDel");
+    if (d) d.onclick = function () { saveOa(null); viewSettings(); toast("キーを削除しました"); };
+  }
   function loadConn() { try { return JSON.parse(localStorage.getItem(CONN_KEY) || "null"); } catch (e) { return null; } }
   function saveConn(c) { conn = c; try { localStorage.setItem(CONN_KEY, JSON.stringify(c)); } catch (e) {} }
 
@@ -131,7 +222,7 @@
 
   /* ---------- 画面：ホーム ---------- */
   function viewHome() {
-    var html = bar("面接準備", "模擬面接までにシートのC列・D列を埋める") + "<main>";
+    var html = bar("面接準備", "模擬面接までにシートのC列・D列を埋める", "", '<a class="skip" href="#/settings">AIの設定</a>') + "<main>";
     html += '<p class="lead">会社を選び、質問に声か文字で答えて「確定」を押すと、面接シートのその会社のタブ（C列・D列）に入ります。深掘り練習では、面接官の突っ込みに時間を計りながら答えます。</p>';
     if (!conn) html += '<p class="warn">この端末はまだシートとつながっていません。左腕たけちゃんから届く設定用リンクを一度開いてください。それまでは答えはこの端末にだけ保存されます。</p>';
     html += '<div class="list">';
@@ -240,8 +331,8 @@
       var aiPrev = getAi(key, q.id);
       html += '<section class="ai" id="ai">' +
         '<div class="ai-head"><span class="ai-title">AIが面接用に整えた文章</span>' +
-        '<button class="text-btn" id="aiRun"' + (conn ? "" : " disabled") + ">" + (aiPrev ? "整え直す" : "整える") + "</button></div>" +
-        '<div class="ai-body" id="aiBody">' + (aiPrev ? esc(aiPrev.out) : '<span class="ai-empty">' + (conn ? "話し終えると、" + esc(co.name) + "の求める人物像と面接で見ているポイントに沿って、この質問への答えに整えます" : "シートとつなぐと使えます") + "</span>") + "</div>" +
+        '<button class="text-btn" id="aiRun"' + (aiReady() ? "" : " disabled") + ">" + (aiPrev ? "整え直す" : "整える") + "</button></div>" +
+        '<div class="ai-body" id="aiBody">' + (aiPrev ? esc(aiPrev.out) : '<span class="ai-empty">' + (aiReady() ? "話し終えると、" + esc(co.name) + "の求める人物像と面接で見ているポイントに沿って、この質問への答えに整えます" : 'AIを使うには、<a href="#/settings">設定</a>でOpenAIのAPIキーを入れてください') + "</span>") + "</div>" +
         '<div class="ai-actions" id="aiActions"' + (aiPrev ? "" : " hidden") + '><button class="btn" id="aiUse">この文章を使う</button></div>' +
         (getRaw(key, q.id) ? '<button class="text-btn" id="rawBack">自分が話した内容に戻す</button>' : "") +
         "</section>";
@@ -318,25 +409,20 @@
     var aiBusy = false;
     function runAi(auto) {
       var src = ta.value.trim();
-      if (!conn || aiBusy) return;
+      if (!aiReady() || aiBusy) return;
       if (!src) { if (!auto) toast("先に話すか入力してください"); return; }
       var prev = getAi(key, q.id);
       if (auto && prev && prev.src === src) return;
       aiBusy = true; aiRun.disabled = true; aiRun.textContent = "整えています";
-      aiBody.innerHTML = '<span class="ai-empty">整えています。10〜20秒ほどかかります</span>';
+      aiBody.innerHTML = '<span class="ai-empty">整えています。10〜30秒ほどかかります</span>';
       var context = col === "D" ? cellText(co, it.row, "C") : "";
-      fetch(conn.url, {
-        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ token: conn.token, action: "polish", company: key, row: it.row, col: col, itemTitle: it.title, question: q.q, context: context, text: src })
-      }).then(function (r) { return r.json(); }).then(function (res) {
-        if (!res.ok) throw new Error(res.error || "failed");
-        setAi(key, q.id, src, res.text);
+      polishText({ co: co, row: it.row, col: col, itemTitle: it.title, question: q.q, context: context, text: src }).then(function (out) {
+        setAi(key, q.id, src, out);
         if (document.getElementById("aiBody") !== aiBody) return;
-        aiBody.textContent = res.text; aiActions.hidden = false;
+        aiBody.textContent = out; aiActions.hidden = false;
       }).catch(function (err) {
         if (document.getElementById("aiBody") !== aiBody) return;
-        var m = String(err.message || "");
-        aiBody.innerHTML = '<span class="ai-empty">' + (m === "no-key" ? "AIのキーがまだ設定されていません" : "整えられませんでした。もう一度押してください") + "</span>";
+        aiBody.innerHTML = '<span class="ai-empty">' + esc(aiErrorText(String(err.message || ""))) + "</span>";
       }).then(function () {
         aiBusy = false;
         if (document.getElementById("aiRun") === aiRun) { aiRun.disabled = false; aiRun.textContent = "整え直す"; }
@@ -595,6 +681,7 @@
     else if (p[0] === "q" && p[1]) viewQuestion(p[1], p[2] || "all", parseInt(p[3] || "0", 10) || 0);
     else if (p[0] === "send") viewSend();
     else if (p[0] === "setup") viewSetup(query);
+    else if (p[0] === "settings") viewSettings();
     else viewHome();
     window.scrollTo(0, 0);
   }
