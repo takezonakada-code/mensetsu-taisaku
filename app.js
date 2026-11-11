@@ -98,7 +98,7 @@
   function aiErrorText(m, detail) {
     if (m === "no-key") return "シート側のAIのキーがまだ設定されていません";
     if (m === "invalid_api_key" || m === "http-401") return "OpenAIのAPIキーが正しくありません。コピーが途中で切れていないか確認して、入れ直してください";
-    if (m === "insufficient_quota") return "OpenAIのAPIの残高がありません。platform.openai.com の Billing で支払い方法とクレジットを入れてください（ChatGPTの月額プランとは別です）";
+    if (m === "insufficient_quota" || /credit|billing|quota/i.test(detail || "")) return "OpenAIのAPIの残高がありません。platform.openai.com の Billing で支払い方法とクレジットを入れてください（ChatGPTの月額プランとは別です）";
     if (m === "http-429" || m === "rate_limit_exceeded") return "OpenAIが混み合っています。少し待ってからもう一度押してください";
     if (m === "model_not_found" || m === "http-404" || (m === "http-400" && /model/i.test(detail || ""))) return "選んだモデルがこのアカウントでは使えません。モデルを別のものに変えて、もう一度試してください";
     if (m === "Load failed" || m === "Failed to fetch" || m === "NetworkError when attempting to fetch resource.") return "OpenAIにつながりませんでした。電波を確認するか、LINEの中ではなくSafariやChromeでこのページを開いて試してください";
